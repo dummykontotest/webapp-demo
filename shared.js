@@ -11,6 +11,27 @@
  const shared=window.deskShared={enabled:false,save:queueSave,render:sharedRender};
 
  async function request(url, options){
+  if(pagesDemo){
+   const draft=structuredClone(state);
+   if(url==="/api/draft" && options?.method==="POST"){
+    const data=JSON.parse(options.body);
+    if(role==="landlord" && data.limits){
+     Object.assign(draft.settings,data.limits);
+     draft.out.approved=false;
+     draft.in.termsApproved=false;
+    }else if(role==="landlord" && data.approval==="settlement"){
+     draft.out.approved=data.value;
+    }else if(role==="landlord" && data.approval==="terms"){
+     draft.in.termsApproved=data.value;
+    }else if(role==="supervisor" && data.draft){
+     draft.out=data.draft.out;
+     draft.in=data.draft.in;
+    }else throw new Error("This action is unavailable in the demo.");
+    localStorage.setItem("b102-desk-v1",JSON.stringify(draft));
+    return {revision:revision+1,draft};
+   }
+   throw new Error("This action requires the shared server.");
+  }
   const response=await fetch(url,options);
   const isJson=response.headers.get("Content-Type")?.includes("application/json");
   const data=isJson?await response.json():null;
@@ -43,9 +64,11 @@
   role=next;
   nav.hidden=!role;
   signOut.hidden=!role;
-  filesNav.hidden=!role;
+  filesNav.hidden=pagesDemo||!role;
   bar.hidden=!role;
-  [...nav.querySelectorAll("a")].filter(a=>a!==filesNav).forEach(a=>a.hidden=role!=="supervisor");
+  [...nav.querySelectorAll("a")].filter(a=>a!==filesNav).forEach(a=>{
+   a.hidden=role!=="supervisor" || (pagesDemo && !["#out","#in"].includes(a.hash));
+  });
  }
  function apply(data){
   Object.assign(state,data.draft);
@@ -93,6 +116,11 @@
   }
  }
  function signIn(){
+  if(pagesDemo){
+   app.innerHTML=title("B-102 Handover Desk","GitHub Pages demo · Use sample data. Drafts stay in this browser.")+
+    card("Choose a role",'<p>Preview the landlord or supervisor workflow.</p><div class="actions"><button type="button" class="primary" data-demo-role="landlord">Continue as Landlord</button><button type="button" class="share" data-demo-role="supervisor">Continue as Supervisor</button></div>',"signin");
+   return;
+  }
   app.innerHTML=title("B-102 Handover Desk","Sign in with the account created for your role.")+
    card("Sign in",'<form id="desk-login"><label class="field"><span>Account</span><select name="role"><option value="supervisor">Agent / Broker</option><option value="landlord">Landlord</option></select></label><label class="field"><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label><button class="primary" type="submit">Sign in</button><p id="login-error" role="status"></p></form>','signin');
   const form=app.querySelector("form");
@@ -110,7 +138,7 @@
     status("Shared draft saved");
     render();
    } catch(error){form.querySelector("#login-error").textContent=error.message;button.disabled=false;}
-  });
+   });
  }
  function landlordPage(){
   const s=settlement(), t=terms();
@@ -123,7 +151,7 @@
     '<p>'+(!t.needs?"Within standing limits":get("in","termsApproved")?"Approved":"Approval requested")+'</p>'+
     (t.needs||get("in","termsApproved")?approval("Approve terms","terms",get("in","termsApproved")):""))+
    card("Signing appointment","<p>"+(get("in","signDate")?esc(fmt(get("in","signDate"))+" · "+get("in","signTime")+" · "+get("in","office")):"Appointment pending")+"</p>")+
-   card("Standing instructions",'<form id="owner-limits">'+fields(...Object.entries(limitLabels).map(([key,label])=>'<label class="field"><span>'+label+'</span><input type="number" name="'+key+'" min="0" max="1000000000" step="any" value="'+num(get("settings",key))+'" required></label>'))+'<button type="submit" class="primary">Save standing limits</button></form>')+'</div>'+link("Open shared files","files","share");
+   card("Standing instructions",'<form id="owner-limits">'+fields(...Object.entries(limitLabels).map(([key,label])=>'<label class="field"><span>'+label+'</span><input type="number" name="'+key+'" min="0" max="1000000000" step="any" value="'+num(get("settings",key))+'" required></label>'))+'<button type="submit" class="primary">Save standing limits</button></form>')+'</div>'+(pagesDemo?"":link("Open shared files","files","share"));
   app.querySelector("#owner-limits").addEventListener("submit",async event=>{
    event.preventDefault();
    if(sending||conflict)return;
@@ -157,11 +185,27 @@
  function sharedRender(){
   if(!shared.enabled)return false;
   if(!role){signIn();return true;}
+  if(pagesDemo){
+   if(role==="landlord"){landlordPage();return true;}
+   if(!/^#(?:out|in)(?:\/|$)/.test(location.hash)){
+    app.innerHTML=title("Supervisor","Choose the protocol to complete.")+'<div class="actions">'+link("Move-out","out","primary")+link("Move-in","in","share")+'</div>';
+    return true;
+   }
+   return false;
+  }
   if(location.hash==="#files"){renderFiles();loadFiles();return true;}
   if(role==="landlord"){landlordPage();return true;}
   return false;
  }
  app.addEventListener("click",async event=>{
+  const demoButton=event.target.closest("[data-demo-role]");
+  if(pagesDemo&&demoButton){
+   setSession(demoButton.dataset.demoRole);
+   history.replaceState(null,"",role==="supervisor"?"#out":"#home");
+   status("Sample data · This browser only");
+   render();
+   return;
+  }
   const button=event.target.closest("[data-approval],[data-delete-file]");
   if(!button)return;
   button.disabled=true;
@@ -198,8 +242,12 @@
  signOut.addEventListener("click",async()=>{
   if(sending){toast("Wait for the current save to finish.");return;}
   if(pending&&!confirm("Sign out and discard unsaved edits?"))return;
-  try{await post("/api/logout",{});}catch(error){if(error.status!==401){toast(error.message);return;}}
-  clearTimeout(timer);pending=false;conflict=false;resetSensitive();setSession(null);render();
+  if(!pagesDemo){
+   try{await post("/api/logout",{});}catch(error){if(error.status!==401){toast(error.message);return;}}
+  }
+  clearTimeout(timer);pending=false;conflict=false;
+  if(!pagesDemo)resetSensitive();
+  setSession(null);render();
  });
  window.addEventListener("beforeunload",event=>{
   if(role&&(pending||sending)){event.preventDefault();event.returnValue="";}
@@ -214,6 +262,13 @@
   }catch{}
  }
  async function start(){
+  if(pagesDemo){
+   shared.enabled=true;
+   signOut.textContent="Switch role";
+   setSession(null);
+   render();
+   return;
+  }
   if(!hosted)return;
   nav.hidden=true;
   try{

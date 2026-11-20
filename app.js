@@ -12,9 +12,10 @@ const bills = ["Electric meter photo sent to landlord and tenant on WhatsApp","G
 const reasons = ["Damaged","Missing","Not working","Dirty or stained","Incomplete","Other"];
 const steps = ["Collect tenant details and Aadhaar","Agree rent, deposit and dates","Draft contract and tenant review","Collect deposit and advance rent","Make the final contract copy","Signing at the lawyer office","Police verification","Send final copies","Hand over the flat"];
 const limitLabels = {rent:"Default rent ₹",minimum:"Minimum rent ₹",months:"Deposit months",advance:"Advance months",hike:"Rent hike after 11 months %",limit:"Discretionary deduction limit ₹",gasRate:"Gas rate ₹ per unit"};
-const settings = {landlord:"Raval Minaben Deepakbhai",landAddress:"12, Gangeshwar Society, Opp Best High School, Maninagar, Ahmedabad 380028",rent:8500,minimum:8500,months:2,advance:1,hike:5,limit:2000,gasRate:43.95};
+const settings = {rent:8500,minimum:8500,months:2,advance:1,hike:5,limit:2000,gasRate:43.95};
 const state = {out:{},in:{},settings:{}};
 const hosted = document.documentElement.hasAttribute("data-shared");
+const pagesDemo = !hosted && location.hostname.endsWith(".github.io");
 try { if(!hosted)Object.assign(state,JSON.parse(localStorage.getItem("b102-desk-v1") || "{}")); } catch {}
 const app = document.querySelector("#app");
 const esc = value => String(value ?? "").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
@@ -305,6 +306,10 @@ async function handleUpload(binding,file){
    if(!["out","in","settings"].every(k=>data[k]&&typeof data[k]==="object"&&!Array.isArray(data[k])))throw Error();
    if(confirm("Replace local drafts and settings with this backup?")){for(const key of Object.keys(extracted))delete extracted[key];Object.assign(state,{out:data.out,in:data.in,settings:data.settings});save();render();}
   } catch {toast("This file is not a valid Handover Desk backup.");}
+  return;
+ }
+ if(pagesDemo && !file.name.toLowerCase().endsWith(".txt")){
+  toast("Document and photo extraction require the shared server. Enter sample details manually.");
   return;
  }
  const meter=id==="electric"||id==="gas";
