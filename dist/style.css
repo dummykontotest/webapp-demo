@@ -5,3 +5,4 @@ details summary .pill{float:right}
 @media(max-width:390px){.fields{grid-template-columns:1fr}details summary .pill{float:none}}
 .sync-bar{max-width:1050px;margin:12px auto 0;padding:0 24px;color:var(--green);font-size:13px}.signin{max-width:430px}.signin form{display:grid;gap:14px}.signin form button{justify-self:start}.file-list{list-style:none;padding:0}.file-list li{display:flex;gap:8px;align-items:center;margin:8px 0}.file-list a{overflow-wrap:anywhere}
 @media print{.sync-bar{display:none!important}}
+.field-stack{display:grid;gap:12px}.agreement{overflow-wrap:anywhere}

@@ -148,7 +148,7 @@
    '<div class="grid">'+card("Move-out settlement",'<p>'+esc(get("out","name")||"Outgoing tenant")+' · '+count("out")+' of '+inspectionSize("out")+' checks</p>'+missingInputs(s)+statement(s)+
     '<p>'+(!s.needs?"Within standing limits":get("out","approved")?"Approved":"Approval requested")+'</p>'+
     (!s.missing.length&&(s.needs||get("out","approved"))?approval("Approve settlement","settlement",get("out","approved")):""))+
-   card("Move-in terms",'<p>'+esc(get("in","name")||"Incoming tenant")+'</p><p>Rent '+money(t.rent)+' · Deposit '+money(t.deposit)+' · Advance '+money(t.advance)+'</p><p>'+esc(t.start?"From "+fmt(t.start)+" through "+fmt(t.end):"Agreement dates pending")+'</p>'+
+   card("Move-in terms",'<p>'+esc(get("in","name")||"Incoming tenant")+'</p><p>Rent '+money(t.rent)+' · Deposit '+money(t.deposit)+'</p><p>'+esc(t.start?"From "+fmt(t.start)+" through "+fmt(t.end):"Agreement dates pending")+'</p>'+
     '<p>'+(!t.needs?"Within standing limits":get("in","termsApproved")?"Approved":"Approval requested")+'</p>'+
     (t.needs||get("in","termsApproved")?approval("Approve terms","terms",get("in","termsApproved")):""))+
    card("Signing appointment","<p>"+(get("in","signDate")?esc(fmt(get("in","signDate"))+" · "+get("in","signTime")+" · "+get("in","office")):"Appointment pending")+"</p>")+

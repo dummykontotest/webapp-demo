@@ -9,14 +9,15 @@ const groups = [
 ];
 const keys = [["Main door","મેઇન દરવાજો",2],["Bedroom doors (1+1)","બેડ રૂમ દરવાજા",2],["Big cupboard","મોટું કપાટ",6],["Small cupboard","નાનું કપાટ",3]];
 const bills = ["Electric meter photo recorded","Gas meter photo recorded","Electric bills taken back from tenant","Gas bills taken back from tenant","Tax bills taken back from tenant"];
-const billEntries = scope => bills.flatMap((label,index)=>scope==="out"&&index<2 ? [] :
- [[index,scope==="in"&&index>=2?["Electric bill reviewed","Gas bill reviewed","Tax bill reviewed"][index-2]:label]]);
+const billEntries = scope => bills.flatMap((label,index)=>index<2 ? [] :
+ [[index,scope==="in"&&index>=2?["Last electric bill copy to tenant","Last gas bill copy to tenant","Last tax bill copy to tenant"][index-2]:label]]);
+const billField = (scope,index) => scope==="in"?"billCopy"+index:"bill"+index;
 const reasons = ["Damaged","Missing","Not working","Dirty or stained","Incomplete","Other"];
-const steps = ["Collect tenant details and Aadhaar","Agree rent, deposit and dates","Draft contract and tenant review","Collect deposit and advance rent","Make the final contract copy","Signing at the lawyer office","Police verification","Send final copies","Hand over the flat"];
-const limitLabels = {rent:"Default rent ₹",minimum:"Minimum rent ₹",months:"Deposit months",advance:"Advance months",hike:"Rent hike after 11 months %",limit:"Discretionary deduction limit ₹",gasRate:"Gas rate ₹ per unit"};
+const steps = ["Collect tenant details and Aadhaar","Agree rent, deposit and dates","Draft contract and tenant review","Collect deposit","Make the final contract copy","Signing at the lawyer office","Police verification","Send final copies","Hand over the flat"];
+const limitLabels = {rent:"Default rent ₹",minimum:"Minimum rent ₹",months:"Deposit months",hike:"Rent hike after 11 months %",limit:"Discretionary deduction limit ₹",gasRate:"Gas rate ₹ per unit"};
 const moveOutLabels = {outDeposit:"Move-out deposit paid ₹",electricRate:"Electricity rate ₹ per unit"};
 const contactFields = [["landlord","Landlord name"],["age","Landlord age","number"],["landAddress","Landlord address","textarea"],["phone","Landlord WhatsApp","tel"],["gpay","Landlord G-Pay","tel"],["supervisor","Supervisor name"]];
-const settings = {rent:8500,minimum:8500,months:2,advance:1,hike:5,limit:2000,gasRate:43.95};
+const settings = {rent:8500,minimum:8500,months:2,hike:5,limit:2000,gasRate:43.95};
 const state = {out:{},in:{},settings:{}};
 const hosted = document.documentElement.hasAttribute("data-shared");
 const pagesDemo = !hosted && location.hostname.endsWith(".github.io");
@@ -46,13 +47,12 @@ const notice = (msg,warn=false) => '<div class="notice '+(warn?'warn':'')+'">'+m
 const itemEntries = groups.flatMap(([group,,items],g)=>items.map((item,i)=>({group,id:"i"+g+"-"+i,name:item.split("|")[0]})));
 const note = (s,id) => get(s,id+"reason")==="Other" ? get(s,id+"note") : get(s,id+"reason");
 function count(s) {
- const extra=["electric","gas","counted",...billEntries(s).map(([i])=>"bill"+i)];
+ const extra=["electric","gas","counted",...billEntries(s).map(([i])=>billField(s,i))];
  return itemEntries.filter(({id})=>get(s,id)).length + extra.filter(id=>get(s,id)!=="" && get(s,id)!==false).length;
 }
 function terms() {
- const rent=num(get("in","rent") || get("settings","rent"));
- const deposit=num(get("in","deposit") || rent*num(get("settings","months")));
- const advance=num(get("in","advance") || rent*num(get("settings","advance")));
+ const rent=num(get("settings","rent"));
+ const deposit=Math.round(rent*num(get("settings","months"))*100)/100;
  const start=get("in","start"), override=get("in","end");
  let end=override;
  if(start && !end){
@@ -62,7 +62,7 @@ function terms() {
   target.setUTCDate(Math.min(d,lastDay)-1);
   end=target.toISOString().slice(0,10);
  }
- return {rent,deposit,advance,start,end,needs:rent<num(get("settings","minimum"))||deposit<rent*num(get("settings","months"))||advance<rent*num(get("settings","advance"))};
+ return {rent,deposit,start,end,needs:rent<num(get("settings","minimum"))};
 }
 function settlement() {
  const deposit=num(get("settings","outDeposit"));
@@ -98,7 +98,7 @@ function home(){
  '<div class="grid">'+['<section class="card"><div class="spread"><h2>Move-out</h2><span class="pill">'+(closed?"Closed":count("out")+" of "+inspectionSize("out"))+'</span></div><p>'+esc(get("out","name")||"Outgoing tenant")+'</p>'+progress(count("out"),inspectionSize("out"))+'<p class="spread"><span>Deductions <b>'+money(s.total)+'</b></span><span>'+balanceLabel(s)+' <b>'+money(Math.abs(s.balance))+'</b></span></p>'+link("Open move-out","out","primary full")+'</section>',
  '<section class="card"><div class="spread"><h2>Move-in</h2><span class="pill">'+done+' of 9</span></div><p>'+esc(get("in","name")||"Incoming tenant")+(t.start?" · from "+fmt(t.start):"")+'</p>'+progress(done,9)+'<p>Next: <b>'+esc(steps[stepsDone().indexOf(false)]||"Complete")+'</b></p>'+link("Open move-in","in","primary full")+'</section>',
  card("Landlord needs to act on",tasks.length?"<ul>"+tasks.map(x=>"<li>"+esc(x)+"</li>").join("")+"</ul>":"<p>Nothing right now.</p>"),
- card("You decide alone when",'<p>Rent is at least '+money(num(get("settings","minimum")))+', with '+esc(get("settings","months"))+' months’ deposit and '+esc(get("settings","advance"))+' month(s) of advance rent.</p><p>Damage, cleaning and other deductions are within '+money(num(get("settings","limit")))+'.</p>',"soft")].join("")+'</div>'+act("Send status to landlord on WhatsApp","share:status","share full");
+ card("You decide alone when",'<p>Rent is at least '+money(num(get("settings","minimum")))+', with '+esc(get("settings","months"))+' months’ deposit.</p><p>Damage, cleaning and other deductions are within '+money(num(get("settings","limit")))+'.</p>',"soft")].join("")+'</div>'+act("Send status to landlord on WhatsApp","share:status","share full");
 }
 function upload(s,id,label,accept,camera=false){
  return '<label class="field"><span>'+label+'</span><input type="file" data-upload="'+s+':'+id+'" accept="'+accept+'" '+(camera?'capture="environment"':'')+'></label>';
@@ -119,7 +119,7 @@ function checklist(s) {
  return '<div class="line">'+en+'<small lang="gu">'+gu+'</small><div class="actions">'+buttons+'</div>'+(status==="issue"?'<div class="issue-fields">'+fields(select,s==="out"?field(s,id+"cost","Cost to deduct ₹","number"):"",get(s,id+"reason")==="Other"?field(s,id+"note","Describe the issue","textarea"):"")+'</div>':"")+'</div>';
  }).join(""))).join("")+
  card("Keys · total 13",keys.map(([en,gu,max],i)=>'<div class="line"><div>'+en+'</div><small lang="gu">'+gu+'</small><div class="row">'+act("−",s+":key:"+i+":-1")+'<b>'+num(get(s,"key"+i))+'</b><small>of '+max+'</small>'+act("+",s+":key:"+i+":1")+'</div></div>').join("")+'<p><strong>Keys counted: '+keys.reduce((a,_,i)=>a+num(get(s,"key"+i)),0)+' of 13</strong></p>'+check(s,"counted","I counted the keys"))+
- card(s==="out"?"Meters and bills":"Meters and papers",["electric","gas"].map((id,i)=>'<div class="line">'+fields(field(s,id,i===0?"Electric meter reading (kWh)":"Gas meter reading","number"),upload(s,id,"Take or upload meter photo","image/*",true))+ (get(s,id+"Time")?'<p class="muted">'+(get(s,id+"CameraTime")?"Photo captured ":"Photo added ")+''+esc(new Date(get(s,id+"Time")).toLocaleString())+'</p>':"")+(get(s,id+"Text")?'<small>OCR: '+esc(get(s,id+"Text"))+'</small><small>Compare the reading with the meter before exporting.</small>'+(get(s,id+"Suggestion")?act("Use OCR reading "+esc(get(s,id+"Suggestion")),s+":meter:"+id):"")+'':"")+(meterPhoto(s,id))+'</div>').join("")+billEntries(s).map(([i,label])=>check(s,"bill"+i,label)).join(""))+'</div>';
+ card(s==="out"?"Meters and bills":"Meters and papers",["electric","gas"].map((id,i)=>'<div class="line">'+fields(field(s,id,i===0?"Electric meter reading (kWh)":"Gas meter reading","number"),upload(s,id,"Take or upload meter photo","image/*",true))+ (get(s,id+"Time")?'<p class="muted">'+(get(s,id+"CameraTime")?"Photo captured ":"Photo added ")+''+esc(new Date(get(s,id+"Time")).toLocaleString())+'</p>':"")+(get(s,id+"Text")?'<small>OCR: '+esc(get(s,id+"Text"))+'</small><small>Compare the reading with the meter before exporting.</small>'+(get(s,id+"Suggestion")?act("Use OCR reading "+esc(get(s,id+"Suggestion")),s+":meter:"+id):"")+'':"")+(meterPhoto(s,id))+'</div>').join("")+billEntries(s).map(([i,label])=>check(s,billField(s,i),label)).join(""))+'</div>';
 }
 const photos={};
 const uploadTokens={};
@@ -163,37 +163,66 @@ function outPage(tab) {
 }
 function stepsDone(){
  const g=id=>get("in",id),t=terms();
- return [g("name")&&g("address")&&g("phone")&&g("idReceived"),t.start&&(!t.needs||g("termsApproved")),g("draftDate")&&g("reviewDate"),g("depositPaid")&&g("advancePaid"),g("printed"),g("signDate")&&g("signTime")&&g("office")&&g("signed"),g("policeDate")&&g("policeRef")&&g("policeDone"),g("originals")&&g("copy"),g("handed")&&count("in")===31].map(Boolean);
+ return [g("name")&&g("address")&&g("phone")&&g("idReceived"),t.start&&(!t.needs||g("termsApproved")),g("draftDate")&&g("reviewDate"),g("depositPaid"),g("printed"),g("signDate")&&g("signTime")&&g("office")&&g("signed"),g("policeDate")&&g("policeRef")&&g("policeDone"),g("originals")&&g("copy"),g("handed")&&count("in")===inspectionSize("in")].map(Boolean);
+}
+const rentAgreementTemplate = "The Party of the LICENSOR (First Party): {{landlord}}, aged {{ownerAge}} years, having Resident at: {{ownerAddress}}.\n\n(Herein called the \"Licensor\" Which expression shall, unless excluded by or repugnant to the content included his heirs, successor executors, administrators, legal representation and assignors) of the ONE PART\n\nThe Party of the LICENSEE: (Second Party): {{tenant}}, aged {{age}}, Occupation: {{job}}, Residing at {{address}}. Aadhar No. {{aadhaar}}.\n\n(herein called the \"Licensee\" Which expression shall, unless excluded by or repugnant to the content included his heirs, successor executors, administrators, legal representation and assignors) of the OTHER PART”.\n\nWhereas the Party of the LICENSOR (First Party) is an owner of the Premise at: B-102, Aastha Apartment, Nr Shantikunj Society, Bakrol, Ta & Dist. Anand, and Gujarat.\n\nNOW THE DEED WITNESS AS FOLLOWS:\n\n(A) OCCUPATIONAL CHARGES: The LICENSEE shall pay the LICENSOR Rs. {{rent}}/- (Rupees {{rentWords}} only) per month as occupational charges for the above-mentioned premise. The occupational charges will be increase by mutual understanding between the licensee and Licensor every year. The said occupational charges are to be paid by the licensee to the Licensor between {{dueFrom}} to {{dueTo}} of every month.\n\n(B) SECURITY DEPOSIT: The licensee has agreed to pay the Licensor an amount of Rs. {{deposit}}/- (Rupees {{depositWords}} only) as a security deposit without bearing any interest towards damages and dues etc. which shall be refunded without interest by the Licensor on receiving the said premise in good condition.\n\n(C) DATE OF OCCUPATION & VALIDITY OF CONTRACT: The Rent Agreement is valid for a period of 11 month from {{start}} TO {{end}} FOR (11 Months) only.\n\n(D) NOTICE PERIOD: In an event when the licensee wishes to hand over. The possession of the premises occupied by them, licensee shall have to give One Month Notice in advance of such intention. Similarly, the Licensor also will have an option to get the premise vacated by giving ONE MONTH notice.\n\n(E) REPAIRS The said premises are given on rent with full furniture. If there is any lost, breakage or out of condition the charges for the said articles and furniture will be borne by the tenant. The licensee shall maintain the premise in good condition and will not cause any damage thereto, if any damage in cause to the premises or any part thereof by the licensee or his servants or agents the same will be made good by the licensee at the cost of the license either by the cost of rectifying the damage or by paying compensation as carry out any work of structure repair or additions or alteration to the said premises. The licensee shall not create any nuisance or annoyance to the people in the neighbourhood and no illegal Item or contraband items and not permitted goods by law in the premises.\n\n1 Air Conditioners, 1 Electric Geyser, 1 Fridge, 1 R.O Water Purifier, Wardrobes, 2 beds with mattresses, 1 sofa, full furniture in kitchen, 5 Fans and 5 Tube Lights. All items are in good condition and are to be returned in usual condition at the time of vacating the flat. If any item will be lost or goes out of order or is broken then the tenant will bear its cost.\n\n(F) ELECTRICITY AND OTHERS: Licensee will pay Municipal Tax, Monthly maintenance, Gas and Electricity bills of his consumption regularly during the agreement period without default and keep proof for the same taken possession.\n\n(G) After the period of 11 months, contract agreement terminates automatically and the licensee shall hand over the vacant possession. However, if both the parties agree, the Rent agreement may be renewed on for additional 11 months as may be agreed a future. There will be appreciation of {{hike}}% after 11 months\n\n(H) It is agreed between parties that the premise shall be used by Residential Purpose only.\n\n(I) It has been agreed between the parties that the licensee shall make the use and occupation of licensee itself and for and authorized representative and shall not sublet or assign its rights to any other party, or in favour of any party or partnership firm and shall maintain the premise free from all encumbrances.\n\n(J) The licensee shall permit the LICENSOR and or his agent at all reasonable time, subject to his convenience, during the duration of this lease, to inspect the premise. Prior information/intimation must be given before visiting the premise.\n\n(K) The licensee shall not store or keep or bring any illegal / dangerous material/item as per the prevailing laws of state of Gujarat & country into the premise which may be injurious to the premise/neighbours. Etc.\n\n(L) The licensee is not entitled to do any business activities from the premises.\n\n(M) The licensee agreed to abide all the rules and regulation of the social order.\n\n(N) On the expiration of the term or period of the license, the licensee shall handover vacant and peaceful possession of the licensed premises to the licensor in the same condition in which the menses now exist. The licensee, occupation of the premises after such termination, will be deemed to be that of a trespasser.\n\n(O) All or any dispute regarding this contract or occupancy shall be first settled mutually, if necessary by mutually agreed arbitration and the jurisdiction shall be Anand only.\n\n(P) The Rent agreement Valid only for 11 months (Eleven months only) It witness where of the parties have signed this on {{signDay}} the day of {{signMonth}}.\n\nDate: {{signDate}}\n\nPlace: {{office}}\n\nSignature of the first party's (LICENSOR) _________________________\n\nSignature of the second party (LICENSEE) __________________________";
+
+function amountInWords(amount){
+ const small=["Zero","One","Two","Three","Four","Five","Six","Seven","Eight","Nine","Ten","Eleven","Twelve","Thirteen","Fourteen","Fifteen","Sixteen","Seventeen","Eighteen","Nineteen"];
+ const tens=["","","Twenty","Thirty","Forty","Fifty","Sixty","Seventy","Eighty","Ninety"];
+ function integerWords(n){
+  if(n<20)return small[n];
+  if(n<100)return tens[Math.floor(n/10)]+(n%10?" "+small[n%10]:"");
+  const [unit,label]=[[10000000,"Crore"],[100000,"Lakh"],[1000,"Thousand"],[100,"Hundred"]].find(([unit])=>n>=unit);
+  return integerWords(Math.floor(n/unit))+" "+label+(n%unit?" "+integerWords(n%unit):"");
+ }
+ const paise=Math.round(amount*100);
+ return integerWords(Math.floor(paise/100))+(paise%100?" and "+integerWords(paise%100)+" Paise":"");
+}
+function rentDue(){
+ const from=Number(get("in","dueFrom")), to=Number(get("in","dueTo"));
+ return Number.isInteger(from)&&Number.isInteger(to)&&from>=1&&from<=to&&to<=31 ? [from,to] : [1,5];
 }
 function agreement(){
- const g=id=>get("in",id)||"________________";
- const t=terms();
- return [
-  "Licensor: "+(get("settings","landlord")||"________________")+", age "+(get("settings","age")||"____")+", of "+(get("settings","landAddress")||"________________")+".",
-  "Licensee: "+g("name")+", age "+g("age")+", occupation "+g("job")+", of "+g("address")+".",
-  "Premises: Flat B-102, Aastha Apartment, Bakrol, Anand, Gujarat.",
-  "Term: "+(fmt(t.start)||"________________")+" through "+(fmt(t.end)||"________________")+".",
-  "Monthly rent: "+money(t.rent)+". Payment window: day "+(g("dueFrom")==="________________"?"1":g("dueFrom"))+" to day "+(g("dueTo")==="________________"?"5":g("dueTo"))+" of each month.",
-  "Security deposit: "+money(t.deposit)+". Advance rent: "+money(t.advance)+".",
-  "Proposed notice period: one month. Proposed rent increase after 11 months: "+num(get("settings","hike"))+"%.",
-  "Signing: "+(fmt(get("in","signDate"))||"________________")+" "+(get("in","signTime")||"")+" · "+g("office")+".",
-  "Licensor signature ____________________     Licensee signature ____________________"
- ].join("\n\n");
+ const t=terms(), sign=get("in","signDate");
+ const [dueFrom,dueTo]=rentDue();
+ const values={
+  landlord:get("settings","landlord"),ownerAge:get("settings","age"),ownerAddress:get("settings","landAddress"),
+  tenant:get("in","name"),age:get("in","age"),job:get("in","job"),address:get("in","address"),aadhaar:get("in","aadhaarNumber"),
+  rent:t.rent.toLocaleString("en-IN"),rentWords:amountInWords(t.rent),
+  deposit:t.deposit.toLocaleString("en-IN"),depositWords:amountInWords(t.deposit),dueFrom,dueTo,
+  start:fmt(t.start),end:fmt(t.end),hike:get("settings","hike"),signDate:fmt(sign),office:get("in","office"),
+  signDay:sign?Number(sign.slice(8,10)):"",
+  signMonth:sign?new Date(sign+"T00:00:00Z").toLocaleDateString("en-IN",{month:"long",year:"numeric",timeZone:"UTC"}):""
+ };
+ return rentAgreementTemplate.replace(/\{\{(\w+)\}\}/g,(_,key)=>values[key]!==""&&values[key]!=null?values[key]:"________________");
+}
+function lawyerMapUrl(){
+ const value=String(get("in","officeCoordinates")).trim();
+ const query=value.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+ const coordinates=query&&Math.abs(Number(query[1]))<=90&&Math.abs(Number(query[2]))<=180 ? query.slice(1).join(",") : "";
+ const destination=coordinates||String(get("in","office")).trim();
+ return destination?"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(destination):"";
 }
 function moveIn(tab) {
- if(tab==="checklist")return title("Move-in checklist","Record the condition of the flat when the tenant takes possession.")+link("Back to move-in","in")+checklist("in")+card("Hand over the flat",check("in","handed","Flat handed over to tenant")+'<div class="actions">'+act("Save protocol as PDF","print:in","primary")+act("Open tenant WhatsApp","share:in","share")+'</div>');
+ if(tab==="checklist")return title("Move-in checklist","Record the condition of the flat when the tenant takes possession.")+link("Back to move-in","in")+checklist("in")+card("Hand over the flat",check("in","handed","Flat handed over to tenant")+'<div class="actions">'+act("Save protocol as PDF","print:in","primary")+act("Send protocol to tenant via WhatsApp","share:in","share")+'</div>');
  const t=terms(), done=stepsDone();
  const f=(id,label,type,def)=>field("in",id,label,type,def), c=(id,label)=>check("in",id,label);
  const parts=[
- fields(f("name","Full name as on Aadhaar"),f("phone","Mobile for WhatsApp","tel"),f("age","Age","number"),f("job","Occupation"),f("address","Permanent address as on Aadhaar","textarea"),upload("in","aadhaar","Import Aadhaar photo or PDF","image/*,application/pdf"))+importReview("in","aadhaar")+c("idReceived","Aadhaar front and back received")+c("portrait","Passport photo received")+c("employer","Employer details noted")+c("verified","Details checked against Aadhaar"),
- fields(f("start","Agreement starts","date"),f("end","End date override","date"),f("rent","Monthly rent ₹","number",t.rent),f("deposit","Deposit ₹","number",t.deposit),f("advance","Advance rent ₹","number",t.advance),f("dueFrom","Rent due from day","number",1),f("dueTo","Rent due to day","number",5))+'<p class="muted" id="term-end"></p>'+notice('<span id="term-warning"></span>',true)+act("Ask landlord on WhatsApp","share:terms","share")+(window.deskShared?.enabled?"<p>"+(get("in","termsApproved")?"Approved by landlord":t.needs?"Awaiting landlord approval in the app":"")+"</p>":c("termsApproved","Landlord replied OK")),
- notice("First-draft terms for review. The complete original agreement template is needed to reproduce its wording.")+'<div class="agreement" data-agreement>'+esc(agreement())+'</div><div class="actions">'+act("Save draft as PDF","print:draft","primary")+act("Open tenant WhatsApp","share:draft","share")+'</div>'+fields(f("draftDate","Draft sent on","date"),f("reviewDate","Tenant replied OK on","date")),
- '<p id="payment-summary"></p><p>Landlord G-Pay <strong>'+esc(get("settings","gpay")||"Add in Settings")+'</strong></p>'+c("depositPaid","Deposit received in landlord account")+f("depositRef","Deposit UPI reference")+c("advancePaid","Advance rent received in landlord account")+f("advanceRef","Advance UPI reference"),
- c("stamp","Stamp paper bought")+f("stampValue","Stamp paper value ₹","number")+c("printed","Final agreement printed")+c("idAttached","Aadhaar copy attached")+c("portraitAttached","Tenant photo attached")+'<div class="actions">'+upload("in","final","Select lawyer-approved final PDF","application/pdf")+act("Download final PDF","download:final","primary")+act("Open tenant WhatsApp","share:final","share")+'</div><p class="muted">The selected file stays in this tab. Attach it in the tenant chat.</p>',
- fields(f("signDate","Date","date"),f("signTime","Time","time"),f("office","Lawyer office"))+'<div class="actions">'+act("Invite tenant on WhatsApp","share:invite","share")+act("Invite landlord on WhatsApp","share:landinvite","share")+'</div>'+c("confirmed","Landlord and tenant both confirmed")+c("signed","Both signed"),
- fields(f("policeDate","Submitted on","date"),f("policeRef","Acknowledgement number"))+c("policeDone","Verification certificate received"),
+ upload("in","aadhaar","Upload Aadhaar photo or PDF","image/*,application/pdf")+
+ fields(f("name","Full name as on Aadhaar"),f("phone","Mobile for WhatsApp","tel"),f("age","Age","number"),
+  '<div class="field-stack">'+f("job","Occupation")+field("in","employerProof","Employer ID Proof (optional)","text","","maxlength=\"150\"")+'</div>',
+  f("address","Permanent address as on Aadhaar","textarea"),
+  field("in","aadhaarNumber","Aadhaar number (current tab only)","text","","inputmode=\"numeric\" maxlength=\"12\" autocomplete=\"off\""))+
+ c("idReceived","Aadhaar front and back received")+c("portrait","Passport photo received")+c("employer","Employer details noted"),
+ fields(f("start","Agreement starts","date"),f("end","End date override","date"),readOnly("Monthly rent",money(t.rent)),readOnly("Deposit",money(t.deposit)),readOnly("Rent due",rentDue().join(" to ")+" of each month"))+'<p class="muted" id="term-end"></p>'+notice('<span id="term-warning"></span>',true)+act("Ask landlord on WhatsApp","share:terms","share")+(window.deskShared?.enabled?"<p>"+(get("in","termsApproved")?"Approved by landlord":t.needs?"Awaiting landlord approval in the app":"")+"</p>":c("termsApproved","Landlord replied OK")),
+ '<div class="agreement" data-agreement>'+esc(agreement())+'</div><div class="actions">'+act("Save draft as PDF","print:draft","primary")+act("Send Draft to Tenant via WhatsApp","share:draft","share")+'</div>'+fields(f("draftDate","Draft sent on","date"),f("reviewDate","Tenant replied OK on","date")),
+ '<p id="payment-summary"></p><p>Landlord GPay <strong>'+esc(get("settings","phone")||"Ask the landlord to add their phone number")+'</strong></p>'+c("depositPaid","Deposit received in landlord account"),
+ c("printed","Final agreement printed")+c("idAttached","Aadhaar copy attached")+c("portraitAttached","Tenant photo attached")+c("employerAttached","Employer ID attached (optional)")+'<div class="actions">'+upload("in","final","Select lawyer-approved final PDF","application/pdf")+act("Download final PDF","download:final","primary")+act("Send final agreement to tenant via WhatsApp","share:final","share")+'</div><p class="muted">The selected file stays in this tab. Attach it in the tenant chat.</p>',
+ fields(f("signDate","Date","date"),f("signTime","Time","time"),f("office","Lawyer office"),field("in","officeCoordinates","Google Maps coordinates (optional)","text","","placeholder=\"Latitude, longitude\""))+'<div class="actions"><a class="button" id="lawyer-map" target="_blank" rel="noopener noreferrer" hidden>Open lawyer’s office in Google Maps</a>'+act("Invite tenant on WhatsApp","share:invite","share")+act("Invite landlord on WhatsApp","share:landinvite","share")+'</div>'+c("confirmed","Landlord and tenant both confirmed")+c("signed","Both signed"),
+ fields(upload("in","police","Upload police verification PDF or photo","image/*,application/pdf"),f("policeDate","Submitted on","date"),f("policeRef","Acknowledgement number"))+c("policeDone","Verification certificate received"),
  c("originals","Original contract and police certificate sent to landlord")+c("copy","Copy given to tenant")+f("copiesDate","Date","date"),
- '<p>'+count("in")+' of 31 done</p>'+progress(count("in"),31)+link("Open handover checklist","in/checklist","primary full")
+ '<p>'+count("in")+' of '+inspectionSize("in")+' done</p>'+progress(count("in"),inspectionSize("in"))+link("Open handover checklist","in/checklist","primary full")
  ];
  const open=new Set([...app.querySelectorAll("details[data-step][open]")].map(el=>el.dataset.step));
  return title("Move-in","Prepare the agreement, arrange signing and hand over the flat.")+
@@ -230,19 +259,19 @@ function live(){
  });
  const end=app.querySelector("#term-end");
  if(end){
-  end.textContent=(t.end?"Ends "+fmt(t.end)+". ":"")+"Total to collect "+money(t.deposit+t.advance)+".";
+  end.textContent=t.end?"Ends "+fmt(t.end)+".":"";
   const warning=app.querySelector("#term-warning");
   warning.parentElement.hidden=!t.needs;
   warning.textContent="These terms fall outside the standing instructions.";
   app.querySelector("[data-action='share:terms']").hidden=!t.needs;
   const approval=app.querySelector("[data-field='in:termsApproved']");
   if(approval)approval.closest("label").hidden=!t.needs;
-  app.querySelector("#payment-summary").textContent="Deposit "+money(t.deposit)+" · Advance "+money(t.advance)+" · Total "+money(t.deposit+t.advance);
+  app.querySelector("#payment-summary").textContent="Deposit "+money(t.deposit);
   app.querySelector("[data-agreement]").textContent=agreement();
-  for(const id of ["rent","deposit","advance"]){
-   const input=app.querySelector('[data-field="in:'+id+'"]');
-   if(input!==document.activeElement && get("in",id)==="") input.value=t[id];
-  }
+  const map=app.querySelector("#lawyer-map"), url=lawyerMapUrl();
+  map.hidden=!url;
+  if(url)map.href=url;
+  else map.removeAttribute("href");
   [...app.querySelectorAll("[data-step] summary .pill")].forEach((badge,i)=>{
    const done=stepsDone()[i];
    badge.textContent=done?"Done":"To do";
@@ -264,12 +293,18 @@ function setField(el){
  const other=/^other(\d+)(name|amount)$/.exec(id);
  const value=el.type==="checkbox"?el.checked:el.value;
  if(other)state.out.others[Number(other[1])][other[2]]=value;
- else if(["contractText","aadhaarText"].includes(id))extracted[s+":"+id]=value;
+ else if(id==="contractText")extracted[s+":"+id]=value;
+ else if(s==="in"&&id==="aadhaarNumber"){
+  el.value=value.replace(/\D/g,"").slice(0,12);
+  extracted["in:aadhaarNumber"]=el.value;
+  live();
+  return;
+ }
  else state[s][id]=value;
  if(s==="out"&&!["approved","agreed","paid","refunded"].includes(id)&&(/cost$/.test(id)||other||/^(deposit|noticeDays|noticeRent|period|electric|gas|billAmount|billUnits)/.test(id))){
   state.out.approved=false;
  }
- if(s==="in"&&["start","end","rent","deposit","advance"].includes(id))state.in.termsApproved=false;
+ if(s==="in"&&["start","end"].includes(id))state.in.termsApproved=false;
  save();
  live();
 }
@@ -293,30 +328,42 @@ function parseDate(raw){
  const d=new Date(iso+"T00:00:00Z");
  return !Number.isNaN(Number(d))&&d.toISOString().startsWith(iso)?iso:"";
 }
+function fillBlankFields(scope,values){
+ const empty=Object.entries(values).filter(([key,value])=>value!==""&&value!=null&&!get(scope,key));
+ for(const [key,value] of empty)state[scope][key]=value;
+ return empty.length;
+}
 function parseDetails(s,id){
  const raw=get(s,id+"Text");
  const match=rx=>raw.match(rx)?.[1]?.trim()||"";
- const values=s==="out" ? {
+ return fillBlankFields(s,{
   name:match(/(?:tenant(?: full)? name|name of (?:the )?tenant|licensee name|^full name|^name)\s*[:–-]\s*([^\n]+)/im)||match(/party of the licensee[^\n]*?\):\s*([^,\n]+)/i),
   phone:match(/(?:tenant|licensee)[ \t]+(?:mobile|phone|telephone|contact)(?:[ \t]+(?:no\.?|number))?[ \t]*[:–-]?[ \t]*(\+?\d[\d ()-]{8,}\d)/i)||
    match(/^(?:mobile|phone|telephone)(?:[ \t]+(?:no\.?|number))?[ \t]*[:–-]?[ \t]*(\+?\d[\d ()-]{8,}\d)/im)
- } : {
-  name:match(/(?:full name|^name)\s*[:–-]\s*([^\n]+)/im)||match(/^([A-Za-z][A-Za-z .'-]+)\n[^\n]*(?:dob|date of birth|yob|year of birth)/im),
-  address:match(/(?:address)\s*[:–-]\s*([\s\S]+?)(?=\n\s*(?:\d{4}\s?\d{4}\s?\d{4}|\[Aadhaar number hidden\]|VID\s*:|Aadhaar|Unique Identification)|$)/i),
-  phone:match(/(?:mobile|phone)\s*[:–-]\s*(\+?\d[\d ()-]{8,}\d)/i)
- };
- if(s==="in"){
-  const dob=parseDate(match(/(?:DOB|Date of Birth)\s*[:–-]?\s*([^\n]+)/i));
-  if(dob){
-   const today=new Date(),birth=new Date(dob+"T00:00:00Z");
-   const before=(today.getMonth()+1)*100+today.getDate()<Number(dob.slice(5,7))*100+Number(dob.slice(8));
-   const age=today.getFullYear()-birth.getUTCFullYear()-Number(before);
-   if(age>=0&&age<=130) values.age=String(age);
-  }
+ });
+}
+function importAadhaar(raw){
+ const text=raw.replace(/[૦-૯०-९]/g,digit=>String("૦૧૨૩૪૫૬૭૮૯०१२३४५६७८९".indexOf(digit)%10));
+ const match=rx=>text.match(rx)?.[1]?.trim()||"";
+ const birthDate=parseDate(match(/(?:\bDOB\b|Date of Birth)[ \t]*[:–-]?[ \t]*([^\n]+)/i));
+ const today=new Date();
+ let age;
+ if(birthDate){
+  const [,month,day]=birthDate.split("-").map(Number);
+  const birthdayPending=(today.getMonth()+1)*100+today.getDate()<month*100+day;
+  age=today.getFullYear()-Number(birthDate.slice(0,4))-Number(birthdayPending);
  }
- const filled=Object.entries(values).filter(([,value])=>value);
- for(const [key,value] of filled) if(!get(s,key))state[s][key]=value;
- return filled.length;
+ const values={
+  name:match(/^[ \t]*(?:full name|name)[ \t]*[:–-][ \t]*([^\n]+)/im)||
+   match(/^[ \t]*([A-Za-z][A-Za-z .'-]{2,})[ \t]*\r?\n[^\n]*(?:\bDOB\b|date of birth|\bYOB\b|year of birth)/im),
+  address:match(/\baddress[ \t]*[:–-][ \t]*([\s\S]+?)(?=\n\s*(?:\d{4}[ -]?\d{4}[ -]?\d{4}|VID\s*:|Aadhaar|Unique Identification|\b(?:phone|mobile)\b)|$)/i).replace(/\s*[\r\n]+\s*/g," "),
+  phone:match(/\b(?:mobile|phone)(?:[ \t]+(?:no\.?|number))?[ \t]*[:–-]?[ \t]*(\+?\d[\d ()-]{8,}\d)/i),
+  age:age>=0&&age<=130?String(age):""
+ };
+ const numbers=[...new Set([...text.matchAll(/(?:^|[^\w])(\d{4}[ -]?\d{4}[ -]?\d{4})(?!\w)/g)].map(match=>match[1].replace(/\D/g,"")))];
+ const hasNumber=numbers.length===1&&!get("in","aadhaarNumber");
+ if(hasNumber)extracted["in:aadhaarNumber"]=numbers[0];
+ return fillBlankFields("in",values)+Number(hasNumber);
 }
 async function handleUpload(binding,file){
  const [s,id]=binding.split(":");
@@ -349,9 +396,8 @@ async function handleUpload(binding,file){
    if(!response.ok)throw Error(result.error);
   }
   if(uploadTokens[binding]!==token)return;
-  if(id==="aadhaar") result.text=result.text.replace(/\b\d{4}[ -]?\d{4}[ -]?\d{4}\b/g,"[Aadhaar number hidden]");
   if(meter)state[s][id+"Text"]=result.text;
-  else extracted[s+":"+id+"Text"]=result.text;
+  else if(id==="contract")extracted[s+":"+id+"Text"]=result.text;
   if(meter){
    const lines=result.text.split("\n").map(x=>x.trim());
    const withUnits=lines.map(line=>line.match(/\b(\d{1,8}(?:[.,]\d{1,4})?)\s*(?:kwh|m[³3])(?:\s|$)/i)?.[1]).filter(Boolean);
@@ -366,6 +412,16 @@ async function handleUpload(binding,file){
    }
    if(result.captured){state[s][id+"Time"]=result.captured;state[s][id+"CameraTime"]=true;}
    toast(candidates.length===1?"Compare the suggested reading with the photo.":"Review the photo and enter the meter reading.");
+  } else if(id==="aadhaar"){
+   toast(importAadhaar(result.text)?"Review the Aadhaar details filled in the form.":"Enter any missing Aadhaar details manually.");
+  } else if(id==="police"){
+   const references=[...result.text.matchAll(/\b(?:acknowledg(?:e)?ment|application)[ \t]*(?:no\.?|number|id|reference)?[ \t]*[:#–-]?[ \t]*(?:\r?\n[ \t]*)?([A-Z0-9]+(?:[/_-][A-Z0-9]+)*)/gi)]
+    .map(match=>match[1]).filter(value=>/\d/.test(value)&&value.length>=4);
+   const ref=[...new Set(references)];
+   if(ref.length===1){
+    const filled=fillBlankFields("in",{policeRef:ref[0]});
+    toast(filled?"Acknowledgement number filled. Check it against the certificate.":"Check the existing acknowledgement number against the uploaded certificate.");
+   }else toast("Enter the acknowledgement number from the certificate.");
   } else toast(parseDetails(s,id)?"Matched empty fields filled. Review them against the original.":"Review the extracted text and complete the fields manually.");
   save();render();
  }catch(error){if(uploadTokens[binding]===token)toast(error.message||"Extraction failed. Enter the details manually.");}
@@ -384,8 +440,9 @@ function share(kind){
  const summary="B-102 · Aastha Apartment\n"+(name?name+"\n":"")+"Deposit: "+money(s.deposit)+"\n"+s.rows.filter(r=>r.amount).map(r=>r.name+": "+money(r.amount)).join("\n")+"\nTotal deductions: "+money(s.total)+"\n"+balanceLabel(s)+": "+money(Math.abs(s.balance))+".";
  const invite=[get("in","signDate"),get("in","signTime"),get("in","office")];
  if(["invite","landinvite"].includes(kind)&&invite.some(x=>!x)){toast("Enter the signing date, time and lawyer office first.");return;}
- const signing="Please confirm the signing appointment for B-102 on "+fmt(invite[0])+" at "+invite[1]+" (local time, India), at "+invite[2]+".";
- const messages={out:summary+"\nPlease review the attached handover protocol.",in:"Please review the attached B-102 move-in handover protocol and confirm the recorded condition.",draft:"Please review the attached B-102 draft rent agreement and reply with any changes.",final:"Please find the final rent agreement for B-102 attached."+(invite.every(Boolean)?"\n"+signing:""),invite:signing,landinvite:signing,approval:"Please confirm the settlement for B-102.\n"+summary,terms:"Please approve the B-102 terms: rent "+money(t.rent)+", deposit "+money(t.deposit)+", advance "+money(t.advance)+".",status:"B-102 status\nMove-out checklist: "+count("out")+"/"+inspectionSize("out")+"\n"+balanceLabel(s)+": "+money(Math.abs(s.balance))+"\nMove-in: "+stepsDone().filter(Boolean).length+"/9 complete."};
+ const mapUrl=lawyerMapUrl();
+ const signing="Please confirm the signing appointment for B-102 on "+fmt(invite[0])+" at "+invite[1]+" (local time, India), at "+invite[2]+"."+(mapUrl?"\n"+mapUrl:"");
+ const messages={out:summary+"\nPlease review the attached handover protocol.",in:"Please review the attached B-102 move-in handover protocol and confirm the recorded condition.",draft:"Please review the attached B-102 draft rent agreement and reply with any changes.",final:"Please find the final rent agreement for B-102 attached."+(invite.every(Boolean)?"\n"+signing:""),invite:signing,landinvite:signing,approval:"Please confirm the settlement for B-102.\n"+summary,terms:"Please approve the B-102 terms: rent "+money(t.rent)+", deposit "+money(t.deposit)+".",status:"B-102 status\nMove-out checklist: "+count("out")+"/"+inspectionSize("out")+"\n"+balanceLabel(s)+": "+money(Math.abs(s.balance))+"\nMove-in: "+stepsDone().filter(Boolean).length+"/9 complete."};
  const landlord=["status","approval","terms","landinvite"].includes(kind);
  whatsapp(get(landlord?"settings":out?"out":"in","phone"),messages[kind]+(signer?"\n"+signer:""));
 }
@@ -414,7 +471,7 @@ function printDoc(kind){
    ["electric","gas"].map(id=>"<div class='line'><p>"+(id==="electric"?"Electricity":"Gas")+": "+esc(get(s,id)||"Pending")+(get(s,id+"Time")?" · "+esc(new Date(get(s,id+"Time")).toLocaleString()):"")+
     (outgoing?"<br>Last paid unit: "+esc(get(s,id+"Previous")||"Pending")+" · Rate per unit: "+money(num(get("settings",id==="electric"?"electricRate":"gasRate"))):"")+
     "</p>"+(outgoing?meterPhoto(s,id):"")+"</div>").join("")+
-   "<ul>"+billEntries(s).map(([i,label])=>"<li>"+label+": "+completed("bill"+i)+"</li>").join("")+"</ul><p>Tenant signature ____________________ &nbsp;&nbsp; Supervisor signature ____________________</p>";
+   "<ul>"+billEntries(s).map(([i,label])=>"<li>"+label+": "+completed(billField(s,i))+"</li>").join("")+"</ul><p>Tenant signature ____________________ &nbsp;&nbsp; Supervisor signature ____________________</p>";
 
  }
  window.print();
