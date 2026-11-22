@@ -6,11 +6,14 @@
  const indicator=document.querySelector("#sync-status");
  const reload=document.querySelector("#reload-shared");
  const exportEdits=document.querySelector("#export-conflict");
+ const flatPicker=document.querySelector("#flat-picker");
+ const flatControl=flatPicker.closest("label");
  let role=null, revision=0, pending=false, sending=false, conflict=false;
+ let availableFlats=[], switching=false, viewVersion=0;
  let timer, fileList=[], fileMessage="";
  const shared=window.deskShared={enabled:false,save:queueSave,render:sharedRender};
 
- async function request(url, options){
+ async function request(url, options, flat=activeFlat){
   if(pagesDemo){
    const draft=structuredClone(state);
    if(url==="/api/draft" && options?.method==="POST"){
@@ -32,7 +35,7 @@
    }
    throw new Error("This action requires the shared server.");
   }
-  const response=await fetch(url,options);
+  const response=await fetch(scopedUrl(url,flat),options);
   const isJson=response.headers.get("Content-Type")?.includes("application/json");
   const data=isJson?await response.json():null;
   if(!response.ok||!isJson){
@@ -44,6 +47,10 @@
    throw error;
   }
   return data;
+ }
+ function scopedUrl(url,flat=activeFlat){
+  return availableFlats.length && /^\/api\/(?:draft|files)(?:\/|$)/.test(url)
+   ? url+"?flat="+encodeURIComponent(flat):url;
  }
  function post(path,data){
   return request(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});
@@ -61,8 +68,12 @@
   finalFile=undefined;
   fileList=[];
  }
- function setSession(next){
+ function setSession(next,flats=[]){
   role=next;
+  availableFlats=flats.filter(flat=>["B-102","B-101"].includes(flat));
+  flatControl.hidden=!role||availableFlats.length<2;
+  flatPicker.innerHTML=availableFlats.map(flat=>'<option value="'+flat+'">'+flat+'</option>').join("");
+  flatPicker.value=activeFlat;
   nav.hidden=!role;
   signOut.hidden=!role;
   filesNav.hidden=pagesDemo||!role;
@@ -75,6 +86,36 @@
   Object.assign(state,data.draft);
   revision=data.revision;
  }
+ flatPicker.addEventListener("change",async()=>{
+  const selected=flatPicker.value;
+  flatPicker.value=activeFlat;
+  if(selected===activeFlat||switching||!availableFlats.includes(selected))return;
+  if(sending||pending||conflict){toast("Resolve unsaved changes before switching flats.");return;}
+  switching=true;
+  viewVersion++;
+  flatPicker.disabled=true;
+  app.inert=true;
+  signOut.disabled=true;
+  try{
+   const data=await request("/api/draft",undefined,selected);
+   if(data.flat!==selected)throw new Error("The server could not load the selected flat.");
+   resetSensitive();
+   activeFlat=selected;
+   flatPicker.value=selected;
+   document.querySelector("#flat-brand").textContent=selected;
+   document.title=selected+" Handover Desk";
+   fileMessage="";
+   apply(data);
+   status("Viewing "+selected);
+   render();
+  }catch(error){toast(error.message);}
+  finally{
+   switching=false;
+   flatPicker.disabled=false;
+   app.inert=false;
+   signOut.disabled=false;
+  }
+ });
  async function load(){
   const data=await request("/api/draft");
   apply(data);
@@ -132,13 +173,13 @@
    try{
     const credentials=Object.fromEntries(new FormData(form));
     const result=await post("/api/login",credentials);
+    setSession(result.role,result.flats);
     const draft=await request("/api/draft");
-    setSession(result.role);
     apply(draft);
     history.replaceState(null,"","#home");
     status("Shared draft saved");
     render();
-   } catch(error){form.querySelector("#login-error").textContent=error.message;button.disabled=false;}
+   } catch(error){setSession(null);form.querySelector("#login-error").textContent=error.message;button.disabled=false;}
    });
  }
  function landlordPage(){
@@ -186,11 +227,15 @@
  function renderFiles(){
   app.innerHTML=title("Shared files","Download the documents and photos saved for this flat.")+
    card("Documents and photos",(role==="supervisor"?'<label class="field"><span>Upload a PDF, JPG or PNG</span><input type="file" id="archive-file" accept="application/pdf,image/jpeg,image/png"></label>':"")+
-    (fileMessage?"<p>"+esc(fileMessage)+"</p>":"")+(fileList.length?'<ul class="file-list">'+fileList.map(file=>'<li><a class="button" href="/api/files/'+encodeURIComponent(file.id)+'">'+esc(file.name)+'</a>'+(role==="supervisor"?'<button type="button" data-delete-file="'+esc(file.id)+'">Delete</button>':"")+'</li>').join("")+'</ul>':"<p>No shared files yet.</p>"));
+    (fileMessage?"<p>"+esc(fileMessage)+"</p>":"")+(fileList.length?'<ul class="file-list">'+fileList.map(file=>'<li><a class="button" href="'+esc(scopedUrl("/api/files/"+encodeURIComponent(file.id)))+'">'+esc(file.name)+'</a>'+(role==="supervisor"?'<button type="button" data-delete-file="'+esc(file.id)+'">Delete</button>':"")+'</li>').join("")+'</ul>':"<p>No shared files yet.</p>"));
  }
  async function loadFiles(){
-  try{fileList=(await request("/api/files")).files;}
-  catch(error){fileMessage=error.message;}
+  const version=viewVersion;
+  try{
+   const result=await request("/api/files");
+   if(version!==viewVersion)return;
+   fileList=result.files;
+  }catch(error){if(version!==viewVersion)return;fileMessage=error.message;}
   if(role && location.hash==="#files")renderFiles();
  }
  function sharedRender(){
@@ -249,7 +294,7 @@
   if(sending||(pending&&!confirm("Discard unsaved edits and load the shared draft?")))return;
   try{await load();pending=false;status("Shared draft saved");}catch(error){toast(error.message);}
  });
- exportEdits.addEventListener("click",()=>fileDownload(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),"B-102-unsaved-edits.json"));
+ exportEdits.addEventListener("click",()=>fileDownload(new Blob([JSON.stringify(state,null,2)],{type:"application/json"}),activeFlat+"-unsaved-edits.json"));
  signOut.addEventListener("click",async()=>{
   if(sending){toast("Wait for the current save to finish.");return;}
   if(pending&&!confirm("Sign out and discard unsaved edits?"))return;
@@ -257,6 +302,10 @@
    try{await post("/api/logout",{});}catch(error){if(error.status!==401){toast(error.message);return;}}
   }
   clearTimeout(timer);pending=false;conflict=false;
+  viewVersion++;
+  activeFlat="B-102";
+  document.querySelector("#flat-brand").textContent=activeFlat;
+  document.title=activeFlat+" Handover Desk";
   if(!pagesDemo)resetSensitive();
   setSession(null);render();
  });
@@ -264,10 +313,11 @@
   if(role&&(pending||sending)){event.preventDefault();event.returnValue="";}
  });
  async function poll(){
-  if(!role||pending||sending||conflict)return;
+  if(!role||pending||sending||conflict||switching)return;
+  const version=viewVersion;
   try{
    const data=await request("/api/draft");
-   if(!role||pending||sending||conflict||data.revision<=revision)return;
+   if(!role||pending||sending||conflict||switching||version!==viewVersion||data.revision<=revision)return;
    if(app.contains(document.activeElement)&&document.activeElement.matches("input,textarea,select"))return;
    apply(data);status("Updated from shared draft");render();
   }catch{}
@@ -286,7 +336,7 @@
    const info=await request("/api/session");
    shared.enabled=true;
    resetSensitive();
-   setSession(info.role);
+   setSession(info.role,info.flats);
    if(role)await load();
    else render();
    setInterval(poll,7000);

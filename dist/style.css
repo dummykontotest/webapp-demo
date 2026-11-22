@@ -6,3 +6,13 @@ details summary .pill{float:right}
 .sync-bar{max-width:1050px;margin:12px auto 0;padding:0 24px;color:var(--green);font-size:13px}.signin{max-width:430px}.signin form{display:grid;gap:14px}.signin form button{justify-self:start}.file-list{list-style:none;padding:0}.file-list li{display:flex;gap:8px;align-items:center;margin:8px 0}.file-list a{overflow-wrap:anywhere}
 @media print{.sync-bar{display:none!important}}
 .field-stack{display:grid;gap:12px}.agreement{overflow-wrap:anywhere}
+
+/* Keep screens anchored to the left while preserving readable line lengths. */
+body{text-align:left}
+.nav,main,footer{margin-inline:0}
+.nav{justify-content:flex-start;column-gap:24px}
+.sync-bar{margin-inline:0}
+button,.button{justify-content:flex-start;text-align:left}
+.settlement td:last-child,.settlement th:last-child{text-align:left}
+#toast{left:clamp(13px,3vw,24px);transform:none}
+.flat-control{display:inline-flex;align-items:center;gap:6px;font-weight:650;font-size:14px}.flat-control select{font:inherit;padding:6px 9px;border:1px solid var(--line);border-radius:8px;background:var(--paper);color:var(--green)}
