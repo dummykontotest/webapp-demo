@@ -23,6 +23,9 @@ SESSION_SECONDS = 12 * 3600
 BLANK = '{"out":{},"in":{},"settings":{}}'
 ROLES = ("supervisor", "landlord")
 STANDING_LIMITS = {"rent", "minimum", "months", "advance", "limit", "gasRate", "hike"}
+MOVE_OUT_SETTINGS = {"outDeposit", "electricRate"}
+CONTACT_SETTINGS = {"landlord", "age", "landAddress", "phone", "gpay", "supervisor"}
+OWNER_SETTINGS = STANDING_LIMITS | MOVE_OUT_SETTINGS | CONTACT_SETTINGS
 
 
 @contextmanager
@@ -91,9 +94,8 @@ def valid_draft(data):
 def review_draft(draft):
     out = {
         key: value for key, value in draft["out"].items()
-        if key in {"name", "approved", "deposit", "period", "noticeRent", "others",
-                   "billAmount", "billUnits", "counted", "electric", "gas",
-                   "electricPrevious", "gasPrevious", "electricRate", "gasRate"}
+        if key in {"name", "approved", "noticeDays", "others", "counted", "electric", "gas",
+                   "electricPrevious", "gasPrevious"}
         or (key.startswith("i") and len(key) > 1 and key[1].isdigit())
         or key.startswith("bill") and key[4:].isdigit()
     }
@@ -101,9 +103,7 @@ def review_draft(draft):
         "name", "start", "end", "rent", "deposit", "advance", "dueFrom", "dueTo",
         "signDate", "signTime", "office", "termsApproved"
     }}
-    settings = {key: value for key, value in draft["settings"].items() if key in {
-        "rent", "minimum", "months", "advance", "limit", "gasRate", "hike"
-    }}
+    settings = {key: value for key, value in draft["settings"].items() if key in OWNER_SETTINGS}
     return {"out": out, "in": incoming, "settings": settings}
 
 
@@ -112,7 +112,7 @@ def approval_details(draft, scope):
     relevant = review[scope]
     if scope == "out":
         ignore = {"approved", "counted"}
-        settings = ("limit", "gasRate")
+        settings = ("limit", "gasRate", "electricRate", "outDeposit", "rent")
     else:
         ignore = {"termsApproved", "signDate", "signTime", "office"}
         settings = ("rent", "minimum", "months", "advance", "hike")
@@ -244,14 +244,20 @@ class SharedHandler(Handler):
                 draft = json.loads(row["body"])
                 field = data.get("approval")
                 allowed = {"settlement": ("out", "approved"), "terms": ("in", "termsApproved")}
-                if "limits" in data:
-                    limits = data["limits"]
-                    if (not isinstance(limits, dict) or set(limits) != STANDING_LIMITS or
-                        any(type(value) not in (int, float) or not 0 <= value <= 10**9
-                            for value in limits.values())):
-                        return self.send_json(400, {"error": "Enter valid nonnegative standing limits."})
+                if "limits" in data or "contacts" in data:
+                    limits = data.get("limits", {})
+                    contacts = data.get("contacts", {})
+                    if (not isinstance(limits, dict) or not set(limits) <= STANDING_LIMITS | MOVE_OUT_SETTINGS or
+                        any(not (type(value) in (int, float) and 0 <= value <= 10**9 or
+                                 key in MOVE_OUT_SETTINGS and value == "")
+                            for key, value in limits.items())):
+                        return self.send_json(400, {"error": "Enter valid nonnegative landlord amounts."})
+                    if (not isinstance(contacts, dict) or not set(contacts) <= CONTACT_SETTINGS or
+                        any(not isinstance(value, str) or len(value) > 500 for value in contacts.values())):
+                        return self.send_json(400, {"error": "Enter valid landlord and supervisor details."})
                     previous = json.loads(row["body"])
                     draft["settings"].update(limits)
+                    draft["settings"].update(contacts)
                     for scope, key in allowed.values():
                         if approval_details(draft, scope) != approval_details(previous, scope):
                             draft[scope][key] = False
@@ -265,7 +271,7 @@ class SharedHandler(Handler):
                 if not valid_draft(draft):
                     return self.send_json(400, {"error": "Invalid draft."})
                 current = json.loads(row["body"])
-                for key in STANDING_LIMITS:
+                for key in OWNER_SETTINGS:
                     draft["settings"].pop(key, None)
                     if key in current["settings"]:
                         draft["settings"][key] = current["settings"][key]

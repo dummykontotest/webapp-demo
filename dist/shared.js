@@ -15,10 +15,10 @@
    const draft=structuredClone(state);
    if(url==="/api/draft" && options?.method==="POST"){
     const data=JSON.parse(options.body);
-    if(role==="landlord" && data.limits){
+    if(role==="landlord" && (data.limits||data.contacts)){
      Object.assign(draft.settings,data.limits);
-     draft.out.approved=false;
-     draft.in.termsApproved=false;
+     Object.assign(draft.settings,data.contacts);
+     if(data.limits){draft.out.approved=false;draft.in.termsApproved=false;}
     }else if(role==="landlord" && data.approval==="settlement"){
      draft.out.approved=data.value;
     }else if(role==="landlord" && data.approval==="terms"){
@@ -56,6 +56,7 @@
  function resetSensitive(){
   Object.assign(state,{out:{},in:{},settings:{}});
   for(const key of Object.keys(extracted))delete extracted[key];
+  for(const key of Object.keys(uploadTokens))delete uploadTokens[key];
   for(const key of Object.keys(photos)){URL.revokeObjectURL(photos[key]);delete photos[key];}
   finalFile=undefined;
   fileList=[];
@@ -67,7 +68,7 @@
   filesNav.hidden=pagesDemo||!role;
   bar.hidden=!role;
   [...nav.querySelectorAll("a")].filter(a=>a!==filesNav).forEach(a=>{
-   a.hidden=role!=="supervisor" || (pagesDemo && !["#out","#in"].includes(a.hash));
+   a.hidden=role!=="supervisor" || (pagesDemo && !["#out","#in","#settings"].includes(a.hash));
   });
  }
  function apply(data){
@@ -144,24 +145,34 @@
   const s=settlement(), t=terms();
   const approval=(label,id,on)=>'<button type="button" class="'+(on?'share':'primary')+'" data-approval="'+id+'" data-value="'+(!on)+'">'+(on?"Withdraw approval":label)+'</button>';
   app.innerHTML=title("Landlord dashboard","Review the agent’s settlement, proposed terms and signing appointment.")+
-   '<div class="grid">'+card("Move-out settlement",'<p>'+esc(get("out","name")||"Outgoing tenant")+' · '+count("out")+' of 31 checks</p>'+statement(s)+
+   '<div class="grid">'+card("Move-out settlement",'<p>'+esc(get("out","name")||"Outgoing tenant")+' · '+count("out")+' of '+inspectionSize("out")+' checks</p>'+missingInputs(s)+statement(s)+
     '<p>'+(!s.needs?"Within standing limits":get("out","approved")?"Approved":"Approval requested")+'</p>'+
-    (s.needs||get("out","approved")?approval("Approve settlement","settlement",get("out","approved")):""))+
+    (!s.missing.length&&(s.needs||get("out","approved"))?approval("Approve settlement","settlement",get("out","approved")):""))+
    card("Move-in terms",'<p>'+esc(get("in","name")||"Incoming tenant")+'</p><p>Rent '+money(t.rent)+' · Deposit '+money(t.deposit)+' · Advance '+money(t.advance)+'</p><p>'+esc(t.start?"From "+fmt(t.start)+" through "+fmt(t.end):"Agreement dates pending")+'</p>'+
     '<p>'+(!t.needs?"Within standing limits":get("in","termsApproved")?"Approved":"Approval requested")+'</p>'+
     (t.needs||get("in","termsApproved")?approval("Approve terms","terms",get("in","termsApproved")):""))+
    card("Signing appointment","<p>"+(get("in","signDate")?esc(fmt(get("in","signDate"))+" · "+get("in","signTime")+" · "+get("in","office")):"Appointment pending")+"</p>")+
-   card("Standing instructions",'<form id="owner-limits">'+fields(...Object.entries(limitLabels).map(([key,label])=>'<label class="field"><span>'+label+'</span><input type="number" name="'+key+'" min="0" max="1000000000" step="any" value="'+num(get("settings",key))+'" required></label>'))+'<button type="submit" class="primary">Save standing limits</button></form>')+'</div>'+(pagesDemo?"":link("Open shared files","files","share"));
-  app.querySelector("#owner-limits").addEventListener("submit",async event=>{
+   card("Standing instructions",'<form id="owner-limits">'+fields(...Object.entries({...limitLabels,...moveOutLabels}).map(([key,label])=>{
+    const value=get("settings",key);
+    return '<label class="field"><span>'+label+'</span><input type="number" name="'+key+'" min="0" max="1000000000" step="any" value="'+esc(value)+'" '+(Object.hasOwn(limitLabels,key)?"required":"")+'></label>';
+   }))+'<button type="submit" class="primary">Save standing limits</button></form>')+
+   card("Landlord and supervisor details",'<form id="owner-contacts">'+fields(...contactFields.map(([key,label,type="text"])=>{
+    const value=esc(get("settings",key));
+    const control=type==="textarea"?'<textarea name="'+key+'" maxlength="500">'+value+'</textarea>':
+     '<input type="'+type+'" name="'+key+'" value="'+value+'" '+(type==="number"?'min="0" max="130"':'maxlength="500"')+'>';
+    return '<label class="field"><span>'+label+'</span>'+control+'</label>';
+   }))+'<button type="submit" class="primary">Save contact details</button></form>')+'</div>'+(pagesDemo?"":link("Open shared files","files","share"));
+  for(const formId of ["owner-limits","owner-contacts"])app.querySelector("#"+formId).addEventListener("submit",async event=>{
    event.preventDefault();
    if(sending||conflict)return;
    const form=event.currentTarget, button=form.querySelector("button");
-   const limits=Object.fromEntries([...new FormData(form)].map(([key,value])=>[key,Number(value)]));
+   const isLimits=formId==="owner-limits";
+   const values=Object.fromEntries([...new FormData(form)].map(([key,value])=>[key,isLimits&&value!==""?Number(value):value.trim()]));
    button.disabled=true;
    sending=true;
    try{
-    apply(await post("/api/draft",{revision,limits}));
-    status("Standing limits saved");
+    apply(await post("/api/draft",{revision,[isLimits?"limits":"contacts"]:values}));
+    status(isLimits?"Standing limits saved":"Contact details saved");
     render();
    }catch(error){
     if(error.status===409)showConflict();
@@ -187,7 +198,7 @@
   if(!role){signIn();return true;}
   if(pagesDemo){
    if(role==="landlord"){landlordPage();return true;}
-   if(!/^#(?:out|in)(?:\/|$)/.test(location.hash)){
+   if(location.hash!=="#settings" && !/^#(?:out|in)(?:\/|$)/.test(location.hash)){
     app.innerHTML=title("Supervisor","Choose the protocol to complete.")+'<div class="actions">'+link("Move-out","out","primary")+link("Move-in","in","share")+'</div>';
     return true;
    }
