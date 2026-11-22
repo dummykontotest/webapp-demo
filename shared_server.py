@@ -1,4 +1,4 @@
-"""Authenticated single-property Handover Desk service."""
+"""Authenticated Handover Desk service."""
 import argparse
 import functools
 import getpass
@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from http.cookies import SimpleCookie
 from http.server import ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 from server import Handler, MAX_UPLOAD, ROOT
 
@@ -22,6 +22,7 @@ ORIGIN = os.getenv("HANDOVER_ORIGIN", "")
 SESSION_SECONDS = 12 * 3600
 BLANK = '{"out":{},"in":{},"settings":{}}'
 ROLES = ("supervisor", "landlord")
+FLATS = ("B-102", "B-101")
 STANDING_LIMITS = {"rent", "minimum", "months", "advance", "limit", "gasRate", "hike"}
 MOVE_OUT_SETTINGS = {"outDeposit", "electricRate"}
 CONTACT_SETTINGS = {"landlord", "age", "landAddress", "phone", "gpay", "supervisor"}
@@ -48,8 +49,19 @@ def initialize():
             CREATE TABLE IF NOT EXISTS attempts (address TEXT PRIMARY KEY, count INTEGER NOT NULL, until INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS draft (id INTEGER PRIMARY KEY CHECK (id=1), revision INTEGER NOT NULL, body TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS files (id TEXT PRIMARY KEY, name TEXT NOT NULL, kind TEXT NOT NULL, bytes BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS flat_drafts (flat TEXT PRIMARY KEY, revision INTEGER NOT NULL, body TEXT NOT NULL);
         """)
+        db.execute("BEGIN IMMEDIATE")
         db.execute("INSERT OR IGNORE INTO draft VALUES (1, 0, ?)", (BLANK,))
+        db.execute("INSERT OR IGNORE INTO flat_drafts SELECT ?,revision,body FROM draft WHERE id=1", (FLATS[0],))
+        db.execute("INSERT OR IGNORE INTO flat_drafts VALUES (?,0,?)", (FLATS[1], BLANK))
+        if "flat" not in {column["name"] for column in db.execute("PRAGMA table_info(files)")}:
+            db.execute("ALTER TABLE files ADD COLUMN flat TEXT NOT NULL DEFAULT 'B-102'")
+
+
+def request_flat(query):
+    values = parse_qs(query, keep_blank_values=True).get("flat", [FLATS[0]])
+    return values[0] if len(values) == 1 and values[0] in FLATS else None
 
 
 def password_hash(password, salt=None):
@@ -159,7 +171,8 @@ class SharedHandler(Handler):
         return self.rfile.read(size)
 
     def do_GET(self):
-        path = urlsplit(self.path).path
+        request = urlsplit(self.path)
+        path = request.path
         if path in ("/", "/index.html"):
             page = (ROOT / "dist" / "index.html").read_text(encoding="utf-8-sig")
             body = page.replace("<html lang=", "<html data-shared lang=", 1).encode()
@@ -174,21 +187,23 @@ class SharedHandler(Handler):
             return self.send_json(200, {"ok": True})
         role = self.role()
         if path == "/api/session":
-            return self.send_json(200, {"role": role})
+            return self.send_json(200, {"role": role, "flats": FLATS if role else ()})
         if not role:
             return self.send_json(401, {"error": "Sign in to continue."})
+        flat = request_flat(request.query)
+        if flat is None:
+            return self.send_json(400, {"error": "Choose a valid flat."})
         with database() as db:
             if path == "/api/draft":
-                row = db.execute("SELECT revision, body FROM draft WHERE id=1").fetchone()
+                row = db.execute("SELECT revision, body FROM flat_drafts WHERE flat=?", (flat,)).fetchone()
                 draft = json.loads(row["body"])
-                return self.send_json(200, {"revision": row["revision"], "draft": review_draft(draft) if role == "landlord" else draft})
+                return self.send_json(200, {"flat": flat, "revision": row["revision"], "draft": review_draft(draft) if role == "landlord" else draft})
             if path == "/api/files":
-                rows = db.execute("SELECT id,name,kind FROM files ORDER BY rowid DESC").fetchall()
+                rows = db.execute("SELECT id,name,kind FROM files WHERE flat=? ORDER BY rowid DESC", (flat,)).fetchall()
                 return self.send_json(200, {"files": [dict(row) for row in rows]})
             if path.startswith("/api/files/"):
-                row = db.execute("SELECT name,kind,bytes FROM files WHERE id=?", (path.rsplit("/", 1)[1],)).fetchone()
+                row = db.execute("SELECT name,kind,bytes FROM files WHERE id=? AND flat=?", (path.rsplit("/", 1)[1], flat)).fetchone()
                 if row:
-                    from urllib.parse import quote
                     self.send_response(200)
                     self.send_header("Content-Type", row["kind"])
                     self.send_header("Content-Disposition", "attachment; filename*=UTF-8''" + quote(row["name"], safe=""))
@@ -229,15 +244,15 @@ class SharedHandler(Handler):
             db.execute("DELETE FROM sessions WHERE expires<=?", (now,))
             db.execute("INSERT INTO sessions VALUES (?,?,?)", (token_hash(token), role, now+SESSION_SECONDS))
             db.executemany("DELETE FROM attempts WHERE address=?", [(key,) for key, _ in counters])
-        self.cookie_reply({"role": role}, token, SESSION_SECONDS)
+        self.cookie_reply({"role": role, "flats": FLATS}, token, SESSION_SECONDS)
 
-    def update(self, data, role):
+    def update(self, data, role, flat):
         revision = data.get("revision")
         if type(revision) is not int:
             return self.send_json(400, {"error": "A draft revision is required."})
         with database() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT revision,body FROM draft WHERE id=1").fetchone()
+            row = db.execute("SELECT revision,body FROM flat_drafts WHERE flat=?", (flat,)).fetchone()
             if revision != row["revision"]:
                 return self.send_json(409, {"error": "This draft changed on another device."})
             if role == "landlord":
@@ -280,11 +295,12 @@ class SharedHandler(Handler):
                                              and approval_details(draft, scope) == approval_details(current, scope))
                 for scope, key in (("out", "contractText"), ("in", "aadhaarText")):
                     draft[scope].pop(key, None)
-            db.execute("UPDATE draft SET body=?,revision=revision+1 WHERE id=1", (json.dumps(draft),))
-        self.send_json(200, {"draft": review_draft(draft) if role == "landlord" else draft, "revision": revision+1})
+            db.execute("UPDATE flat_drafts SET body=?,revision=revision+1 WHERE flat=?", (json.dumps(draft), flat))
+        self.send_json(200, {"flat": flat, "draft": review_draft(draft) if role == "landlord" else draft, "revision": revision+1})
 
     def do_POST(self):
-        path = urlsplit(self.path).path
+        request = urlsplit(self.path)
+        path = request.path
         origin = ORIGIN or "http://" + self.headers.get("Host", "")
         if self.headers.get("Origin") != origin:
             return self.send_json(403, {"error": "Use the configured app address."})
@@ -303,11 +319,14 @@ class SharedHandler(Handler):
                 with database() as db:
                     db.execute("DELETE FROM sessions WHERE token=?", (token_hash(cookie["desk_session"].value),))
                 return self.cookie_reply({"role": None})
+            flat = request_flat(request.query)
+            if flat is None:
+                return self.send_json(400, {"error": "Choose a valid flat."})
             if path == "/api/draft":
                 data = json.loads(self.read_data(1024*1024))
                 if not isinstance(data, dict):
                     raise ValueError()
-                return self.update(data, role)
+                return self.update(data, role, flat)
             if role != "supervisor":
                 return self.send_json(403, {"error": "The agent manages files and inspection details."})
             if path.startswith("/read/"):
@@ -318,7 +337,7 @@ class SharedHandler(Handler):
                 if not isinstance(identifier, str):
                     raise ValueError()
                 with database() as db:
-                    result = db.execute("DELETE FROM files WHERE id=?", (identifier,))
+                    result = db.execute("DELETE FROM files WHERE id=? AND flat=?", (identifier, flat))
                 if not result.rowcount:
                     return self.send_json(404, {"error": "File not found."})
                 return self.send_json(200, {"deleted": True})
@@ -331,7 +350,7 @@ class SharedHandler(Handler):
                 name = unquote(self.headers.get("X-File-Name", "File"))[:180] or "File"
                 identifier = secrets.token_hex(16)
                 with database() as db:
-                    db.execute("INSERT INTO files VALUES (?,?,?,?)", (identifier, name, content_type, payload))
+                    db.execute("INSERT INTO files (id,name,kind,bytes,flat) VALUES (?,?,?,?,?)", (identifier, name, content_type, payload, flat))
                 return self.send_json(201, {"id": identifier})
             return self.send_json(404, {"error": "Not found."})
         except (ValueError, TimeoutError):
